@@ -14,12 +14,12 @@ def gaussian_kernel(size, sigma = 1.0):
     )
     return kernel / np.sum(kernel)
 
-def gaussian_blur(image, kernel_size, sigma):
+def gaussian_blur(image, kernel_size = 5, sigma = 1):
     """Apply Guassian Blurring to the image."""
     kernel = gaussian_kernel(kernel_size, sigma)
     return convolve(image, kernel)
 
-def gaussian_derivative_kernel(size, sigma, order = 1):
+def gaussian_derivative_kernel(size = 5, sigma = 1, order = 1):
     """Generate a 1D Gaussian derivative kernel."""
     if size % 2 == 0:
         size += 1
@@ -30,15 +30,31 @@ def gaussian_derivative_kernel(size, sigma, order = 1):
     kernel = (-1) ** order * kernel / (np.sqrt(2 * np.pi) * sigma ** 3)
     return kernel / np.sum(np.abs(kernel)) 
 
-def apply_gradient_operator(image, kernel):
+def apply_gradient_operator(image, kernel = gaussian_derivative_kernel()):
     """Apply the gradient operator to the image using the provided kernels."""
     gradient_x = convolve1d(image, kernel, axis = -1, mode = 'reflect')
     gradient_y = convolve1d(image, kernel, axis = -2, mode = 'reflect')
     return gradient_x, gradient_y
 
+def sobel_operator(image):
+    """Apply the Sobel operator to the image."""
+    sobel_x = np.array([[-3, 0, 3],
+                        [-10, 0, 10],
+                        [-3, 0, 3]])
+    
+    sobel_y = np.array([[-3, -10, -3],
+                        [0, 0, 0],
+                        [3, 10, 3]])
+
+    gradient_x = convolve(image, sobel_x, mode='reflect')
+    gradient_y = convolve(image, sobel_y, mode='reflect')
+    
+    return gradient_x, gradient_y
+
 def non_max_suppression(gradient_x, gradient_y):
     """Apply non-max suppression (NMS) to the image using its gradient images."""
     gradient_magnitude = np.sqrt(gradient_x ** 2 + gradient_y ** 2)
+    print(np.max(gradient_magnitude))
     gradient_direction = np.arctan2(gradient_y, gradient_x)
 
     rows, cols = gradient_magnitude.shape
@@ -52,10 +68,10 @@ def non_max_suppression(gradient_x, gradient_y):
         t = np.abs(np.tan(angle))
         mask = (-1 < t) & (t < 1)
 
-        x1, y1 = i - 1, (j[mask] - t[mask]).astype(int)
-        x2, y2 = i - 1, (j[mask] - t[mask] + 1).astype(int)
-        x3, y3 = i + 1, (j[mask] + t[mask] + 1).astype(int)
-        x4, y4 = i + 1, (j[mask] + t[mask]).astype(int)
+        x1, y1 = i - 1, (j[mask] - t[mask]).astype(np.int16)
+        x2, y2 = i - 1, (j[mask] - t[mask] + 1).astype(np.int16)
+        x3, y3 = i + 1, (j[mask] + t[mask] + 1).astype(np.int16)
+        x4, y4 = i + 1, (j[mask] + t[mask]).astype(np.int16)
 
         c1 = (1 - t[mask]) * gradient_magnitude[x1, y1] + t[mask] * gradient_magnitude[x2, y2]
         c2 = (1 - t[mask]) * gradient_magnitude[x3, y3] + t[mask] * gradient_magnitude[x4, y4]
@@ -80,7 +96,7 @@ def non_max_suppression(gradient_x, gradient_y):
 
     return result
 
-def thinning_double_threshold(img, t1 = 5, t2 = 13):
+def thinning_double_threshold(img, t1 = 1, t2 = 13):
     """Applying double threshold thinning algorithm to the image."""
     result = np.zeros_like(img)
     strong_edges = img >= t2
@@ -89,11 +105,34 @@ def thinning_double_threshold(img, t1 = 5, t2 = 13):
     result[strong_edges] = 255
     result[~(strong_edges | weak_edges)] = 0  
 
-    for i in range(1, img.shape[0] - 1):
-        for j in range(1, img.shape[1] - 1):
-            if weak_edges[i, j]:
-                if np.any(strong_edges[i - 1 : i + 2, j - 1 : j + 2]):
-                    result[i, j] = 255
+    flg = 1
+    p = 1
+    while(flg == 1):
+        p += 1
+        flg = 0
+        print(np.sum(weak_edges))
+        for i, j in np.argwhere(weak_edges):
+            if np.any(strong_edges[i - 1 : i + 1, j - 1 : j + 1]):
+                result[i, j] = 255
+                strong_edges[i, j] = True
+                weak_edges[i, j] = False
+                flg = 1
+            if not np.any(strong_edges[i - 2 : i + 2, j - 2 : j + 2]):
+                weak_edges[i, j] = False
+            
+#     for i in range(1, img.shape[0] - 1):
+#         for j in range(1, img.shape[1] - 1):
+#             if weak_edges[i, j]:
+#                 if np.any(strong_edges[i - 1 : i + 2, j - 1 : j + 2]):
+#                     result[i, j] = 255
+#                     strong_edges[i, j] = True
+                    
+#     for i in range(1, img.shape[0] - 1):
+#         for j in range(1, img.shape[1] - 1):
+#             if weak_edges[i, j]:
+#                 if np.any(strong_edges[i - 1 : i + 2, j - 1 : j + 2]):
+#                     result[i, j] = 255
+#                     strong_edges[i, j] = True
                     
     return result
 
@@ -109,17 +148,20 @@ def get_neighbors(img, i, j):
 
     return np.array(neighbors)[np.array([1, 2, 4, 7, 6, 5, 3, 0])]
 
-def thinning_zhangsuen(img):
+def thinning_zhangsuen(img, t1 = 1, t2 = 13):
     """Apply Zhang-Suen Thinning algorithm （张太怡-孫靖夷细化算法） to the image."""
     # 效果一般，速度贼慢
-    img = img.copy()
-    rows, cols = img.shape
+    result = np.zeros_like(img)
+    result[img > t2] = 1
+    
+    rows, cols = result.shape
+    
+    to_be_processed = np.column_stack(np.where(img > t2))
 
-    to_be_processed = np.column_stack(np.where(img == 1))
-
-    i = 0
-    while i < 20:
-        i += 1
+    p = 0
+    while p < 20:
+        print(len(to_be_processed))
+        p += 1
         to_delete = []
         
         # Iteration 1
@@ -136,13 +178,13 @@ def thinning_zhangsuen(img):
             # Criterion 1C: P2 * P4 * P6 == 0
             # Criterion 1D: P4 * P6 * P8 == 0
             if          (2 <= np.sum(neighbors) <= 6) \
-                    and (sum(neighbors[i] == 0 and neighbors[(i + 1) % 8] == 1 for i in range(0, 8)) == 1) \
+                    and (np.sum(neighbors[i] == 0 and neighbors[(i + 1) % 8] == 1 for i in range(0, 8)) == 1) \
                     and (neighbors[1] * neighbors[3] * neighbors[5] == 0) \
                     and (neighbors[3] * neighbors[5] * neighbors[7] == 0):
                 to_delete.append(point)
                 
         for point in to_delete:
-            img[point[0], point[1]] = 0    
+            result[point[0], point[1]] = 0    
             
         to_be_processed = np.delete(to_be_processed, to_delete, axis=0)
         
@@ -154,31 +196,49 @@ def thinning_zhangsuen(img):
         # Iteration 2
         for point in to_be_processed:
             i, j = point
-            neighbors = get_neighbors(img, i, j)
+            neighbors = get_neighbors(result, i, j)
             
             # Criterion 2A: 2 <= #(Neighbor == 1) >= 6
             # Criterion 2B: #(0 -> 1 when iterating using indices above) == 1
             # Criterion 2C: P2 * P4 * P8 == 0
             # Criterion 2D: P2 * P6 * P8 == 0
             if          (2 <= np.sum(neighbors) <= 6) \
-                    and (sum(neighbors[i] == 0 and neighbors[(i + 1) % 8] == 1 for i in range(0, 8)) == 1) \
+                    and (np.sum(neighbors[i] == 0 and neighbors[(i + 1) % 8] == 1 for i in range(0, 8)) == 1) \
                     and (neighbors[1] * neighbors[3] * neighbors[7] == 0) \
                     and (neighbors[1] * neighbors[5] * neighbors[7] == 0):
                 to_delete.append(point)
                 
         for point in to_delete:
-            img[point[0], point[1]] = 0    
+            result[point[0], point[1]] = 0    
             
         to_be_processed = np.delete(to_be_processed, to_delete, axis=0)
         
         if len(to_delete) == 0:
             break
-
-    return img
+    result[result > 0] = 255
+    return result
 
 def calculate_angle_image(grad_x, grad_y):
     """Return the image whose elements are arctan(grad_y / grad_x)."""
     return np.arctan2(grad_y, grad_x)
+
+# from collections import Counter
+import cv2
+
+def edge_detect(img, is_gray = False, kernel_size = 5, lower_threshold = 5, upper_threshold = 13):
+    if not is_gray:
+        img = rgb_to_gray(img)
+    img = gaussian_blur(img, kernel_size = kernel_size)
+    gx, gy = apply_gradient_operator(img, kernel = gaussian_derivative_kernel(size = kernel_size))
+#     gx, gy = sobel_operator(img)
+#     gx = cv2.Sobel(img, cv2.CV_64F, 1, 0, ksize=3)
+#     gy = cv2.Sobel(img, cv2.CV_64F, 0, 1, ksize=3)
+    nms = non_max_suppression(gx, gy)
+    flat_data = nms.flatten()
+
+    res = thinning_double_threshold(nms, lower_threshold, upper_threshold)
+#     res = thinning_zhangsuen(nms)
+    return res
 
 # def gaussian_blur_color(image, kernel_size, sigma):
 #     """Apply Gaussian blur to a three-channel image."""
