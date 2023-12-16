@@ -281,7 +281,7 @@ def hough_transform(edge_image, theta_res = 1, rho_res = 1):
 
     return accumulator, theta_vals, rho_vals
 
-def find_hough_peaks(accumulator, threshold = 100, neighborhood_size = 10):
+def find_hough_peaks(accumulator, theta_vals, rho_vals, threshold = 100, neighborhood_size = 10):
     """
     To find peak values in the parameter space of Hough transformation.
 
@@ -325,7 +325,7 @@ def find_hough_peaks(accumulator, threshold = 100, neighborhood_size = 10):
         if flg == 1:
             peaks.append(peak)
             
-    return peaks
+    return [(rho_vals[rho], theta_vals[theta]) for rho, theta in peaks]
 
 
 # def gaussian_blur_color(image, kernel_size, sigma):
