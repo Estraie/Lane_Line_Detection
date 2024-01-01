@@ -1,10 +1,26 @@
 import numpy as np
 import pandas as pd
 from scipy.ndimage import convolve, convolve1d
+from skimage import exposure
 
 def rgb_to_gray(image, scale = 1):
     """Generate a gray scale image from an RGB(A) image."""
     return (np.dot(image[..., :3], [0.299, 0.587, 0.114]) * scale).astype(np.uint8)
+
+def histogram_equalization(image):
+    """To raise the image's contrast ratio"""
+    equalized_image = exposure.equalize_hist(image)
+    return (equalized_image * 255).astype(np.uint8)
+
+def sharpen(image):
+    kernel = np.array([[-1, -1, -1],
+                       [-1,  9, -1],
+                       [-1, -1, -1]])
+
+    sharpened_image = convolve(image, kernel)
+    sharpened_image = np.clip(sharpened_image, 0, 255).astype(np.uint8)
+    return sharpened_image
+
 
 def gaussian_kernel(size, sigma = 1.0):
     """Generate a Gaussian kernel with standard deviation = sigma within the interval [-size, size]."""
@@ -234,18 +250,23 @@ def calculate_angle_image(grad_x, grad_y):
 def edge_detect(
     img, 
     is_gray = False, 
-    blur_kernel_size = 5, 
+    blur_kernel_size = 9, 
     blur_sigma = 1,
     dev_kernel_size = 9,
     dev_sigma = 0.4,
     lower_threshold = 5, 
-    upper_threshold = 12, 
+    upper_threshold = 10, 
     sigma = 0.4, 
-    form = "png"
+    form = "png",
+    raise_contrast_ratio = False
 ):
     scale = 255 if form == "png" else 1
     if not is_gray:
         img = rgb_to_gray(img, scale)
+    
+    if raise_contrast_ratio:
+        img = histogram_equalization(img)
+    
     img = gaussian_blur(img, kernel_size = blur_kernel_size, sigma = blur_sigma)
     
     gx, gy = apply_gradient_operator_2d(
@@ -260,7 +281,7 @@ def edge_detect(
     return res
 
 
-def hough_transform(edge_image, theta_res = 1, rho_res = 1):
+def hough_transform(edge_image, theta_res = 1, rho_res = 1, apply_mask = True):
     height, width = edge_image.shape
     diag_len = int(np.sqrt(height ** 2 + width ** 2))
     max_rho = diag_len
@@ -274,6 +295,8 @@ def hough_transform(edge_image, theta_res = 1, rho_res = 1):
     edge_points = np.column_stack(np.where(edge_image > 0))
     for point in edge_points:
         x, y = point
+        if apply_mask and x < height // 2:
+            continue
         for theta_index, (sin_theta, cos_theta) in enumerate(zip(sin_vals, cos_vals)):
             rho = int(x * cos_theta + y * sin_theta)
             rho_index = np.argmin(np.abs(rho_vals - rho))
@@ -281,7 +304,7 @@ def hough_transform(edge_image, theta_res = 1, rho_res = 1):
 
     return accumulator, theta_vals, rho_vals
 
-def find_hough_peaks(accumulator, theta_vals, rho_vals, threshold = 100, neighborhood_size = 10):
+def find_hough_peaks(accumulator, theta_vals, rho_vals, threshold = 100, neighborhood_size = 20):
     """
     To find peak values in the parameter space of Hough transformation.
 
@@ -315,17 +338,44 @@ def find_hough_peaks(accumulator, theta_vals, rho_vals, threshold = 100, neighbo
         if is_maximal:
             filtered_peaks.append((row, col))
     filtered_peaks = sorted(filtered_peaks, key=lambda x: accumulator[x[0], x[1]], reverse=True)
+#     filtered_peaks = sorted(
+#         filtered_peaks, 
+#         key=lambda x: abs(row * np.cos(x[1]) + col / 2 * np.sin(x[1]) - x[0]), 
+#         reverse=False)
     peaks = []
     for peak in filtered_peaks:
         flg = 1
         for p in peaks:
-            if abs(p[0] - peak[0]) + abs(p[1] - peak[1]) <= neighborhood_size:
+            if abs(p[0] - peak[0]) / 10 + abs(p[1] - peak[1]) <= neighborhood_size:
                 flg = 0
                 break
         if flg == 1:
             peaks.append(peak)
             
     return [(rho_vals[rho], theta_vals[theta]) for rho, theta in peaks]
+
+def enhance_contrast(image, alpha = 1.5, beta = 0, scale = 255):
+    # Apply contrast enhancement using the formula: new_pixel = alpha * pixel + beta
+    enhanced_image = np.clip(alpha * (image * scale) + beta, 0, 255).astype(np.uint8)
+    return enhanced_image
+
+def enhance_saturation(img, saturation_factor = 1.5, scale = 255.0):
+
+    # Normalization
+    img_float = img.astype(float) / 255.0 * scale
+
+    r, g, b = img_float[:,:,0], img_float[:,:,1], img_float[:,:,2]
+
+    gray = 0.299 * r + 0.587 * g + 0.114 * b
+    
+    # Calculate saturation
+    saturation = np.where(gray < 0.5, (gray * (1 + saturation_factor)), ((1 - gray) * saturation_factor + gray))
+
+    # Create a new image with adjusted saturation
+    enhanced_image = np.stack([r * saturation, g * saturation, b * saturation], axis=-1)
+    
+    enhanced_image = np.clip(enhanced_image * 255.0, 0, 255).astype(np.uint8)
+    return enhanced_image
 
 
 # def gaussian_blur_color(image, kernel_size, sigma):
